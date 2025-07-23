@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  mlb-data-service:
+    build: .
+    container_name: mlb-data-service
+    ports:
+      - "8001:8001"
+    environment:
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
+      - ./mlb_data_service:/app/mlb_data_service
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - mlb-network
+
+  # Future services will be added here
+  # prediction-engine:
+  #   build: ./prediction_engine
+  #   ports:
+  #     - "8002:8002"
+  
+  # content-creation:
+  #   build: ./content_creation
+  #   ports:
+  #     - "8003:8003"
+  
+  # social-media:
+  #   build: ./social_media
+  #   ports:
+  #     - "8004:8004"
+
+networks:
+  mlb-network:
+    driver: bridge
+
+volumes:
+  mlb-logs:
+    driver: local
