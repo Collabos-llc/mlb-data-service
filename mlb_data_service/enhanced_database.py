@@ -15,8 +15,17 @@ from datetime import datetime, date
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import pybaseball as pyb
+import time
 
 logger = logging.getLogger(__name__)
+
+# Import monitoring capabilities
+try:
+    from .monitoring.data_monitor import DataFreshnessTracker
+    MONITORING_AVAILABLE = True
+except ImportError:
+    MONITORING_AVAILABLE = False
+    logger.warning("Data monitoring not available in enhanced database")
 
 class EnhancedDatabaseManager:
     """Enhanced database manager for comprehensive MLB data"""
@@ -29,6 +38,23 @@ class EnhancedDatabaseManager:
         
         # Disable PyBaseball cache for fresh data
         pyb.cache.disable()
+        
+        # Initialize monitoring
+        self.performance_metrics = {
+            'operations_count': 0,
+            'total_records_processed': 0,
+            'average_operation_time': 0.0,
+            'last_operation_time': None
+        }
+        
+        # Initialize freshness tracker if available
+        self.freshness_tracker = None
+        if MONITORING_AVAILABLE:
+            try:
+                self.freshness_tracker = DataFreshnessTracker()
+                logger.info("Database freshness tracker initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize freshness tracker: {e}")
     
     def _init_connection_pool(self):
         """Initialize connection pool"""
@@ -69,8 +95,70 @@ class EnhancedDatabaseManager:
             logger.error(f"Database connection test failed: {e}")
             return False
     
+    def _track_operation_performance(self, operation_name: str, start_time: float, records_processed: int) -> None:
+        """Track performance metrics for database operations"""
+        operation_time = time.time() - start_time
+        
+        self.performance_metrics['operations_count'] += 1
+        self.performance_metrics['total_records_processed'] += records_processed
+        self.performance_metrics['last_operation_time'] = operation_time
+        
+        # Calculate running average
+        total_ops = self.performance_metrics['operations_count']
+        current_avg = self.performance_metrics['average_operation_time']
+        self.performance_metrics['average_operation_time'] = (
+            (current_avg * (total_ops - 1) + operation_time) / total_ops
+        )
+        
+        logger.debug(f"Operation {operation_name}: {operation_time:.2f}s, {records_processed} records")
+    
+    def _validate_data_before_storage(self, data: pd.DataFrame, table_name: str) -> Dict[str, Any]:
+        """Validate data quality before storing in database"""
+        validation_result = {
+            'table_name': table_name,
+            'total_records': len(data),
+            'validation_passed': True,
+            'issues': [],
+            'null_percentages': {},
+            'duplicate_records': 0
+        }
+        
+        if data.empty:
+            validation_result['validation_passed'] = False
+            validation_result['issues'].append('DataFrame is empty')
+            return validation_result
+        
+        # Check for null percentages
+        for column in data.columns:
+            null_count = data[column].isnull().sum()
+            null_percentage = null_count / len(data)
+            validation_result['null_percentages'][column] = round(null_percentage, 4)
+            
+            if null_percentage > 0.5:  # More than 50% nulls
+                validation_result['issues'].append(f"High null percentage in {column}: {null_percentage:.2%}")
+        
+        # Check for duplicates (if possible)
+        try:
+            if 'Name' in data.columns and 'Team' in data.columns:
+                duplicates = data.duplicated(subset=['Name', 'Team']).sum()
+                validation_result['duplicate_records'] = duplicates
+                
+                if duplicates > 0:
+                    validation_result['issues'].append(f"Found {duplicates} duplicate records")
+        except Exception as e:
+            logger.debug(f"Could not check duplicates for {table_name}: {e}")
+        
+        # Set validation status
+        if validation_result['issues']:
+            validation_result['validation_passed'] = False
+        
+        return validation_result
+    
     def collect_and_store_fangraphs_batting(self, season: int = None, min_pa: int = 10) -> int:
         """Collect and store comprehensive FanGraphs batting data"""
+        start_time = time.time()
+        operation_name = f"fangraphs_batting_{season}"
+        
         if season is None:
             season = datetime.now().year
             
@@ -82,9 +170,18 @@ class EnhancedDatabaseManager:
             
             if batting_data is None or batting_data.empty:
                 logger.warning(f"No FanGraphs batting data returned for {season}")
+                self._track_operation_performance(operation_name, start_time, 0)
                 return 0
             
             logger.info(f"Retrieved {len(batting_data)} batting records from FanGraphs")
+            
+            # Validate data quality before storage
+            validation_result = self._validate_data_before_storage(batting_data, 'fangraphs_batting')
+            
+            if not validation_result['validation_passed']:
+                logger.warning(f"Data quality issues detected: {validation_result['issues']}")
+            else:
+                logger.info(f"Data validation passed for {len(batting_data)} records")
             
             # Store in database using direct DataFrame approach
             conn = None
@@ -117,13 +214,18 @@ class EnhancedDatabaseManager:
                 conn.commit()
                 cursor.close()
                 
-                logger.info(f"Stored {len(batting_data)} FanGraphs batting records for {season}")
-                return len(batting_data)
+                # Track performance and log success
+                records_stored = len(batting_data)
+                self._track_operation_performance(operation_name, start_time, records_stored)
+                
+                logger.info(f"Stored {records_stored} FanGraphs batting records for {season}")
+                return records_stored
                 
             except Exception as e:
                 if conn:
                     conn.rollback()
                 logger.error(f"Failed to store FanGraphs batting data: {e}")
+                self._track_operation_performance(operation_name, start_time, 0)
                 return 0
             finally:
                 if conn:
@@ -131,6 +233,7 @@ class EnhancedDatabaseManager:
                     
         except Exception as e:
             logger.error(f"Failed to collect FanGraphs batting data: {e}")
+            self._track_operation_performance(operation_name, start_time, 0)
             return 0
     
     def collect_and_store_fangraphs_pitching(self, season: int = None, min_ip: int = 5) -> int:
@@ -527,6 +630,72 @@ class EnhancedDatabaseManager:
         except Exception as e:
             logger.error(f"Failed to search players: {e}")
             return []
+
+    def get_performance_metrics(self) -> Dict[str, Any]:
+        """Get performance metrics for database operations"""
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'operations_completed': self.performance_metrics['operations_count'],
+            'total_records_processed': self.performance_metrics['total_records_processed'],
+            'average_operation_time_seconds': round(self.performance_metrics['average_operation_time'], 3),
+            'last_operation_time_seconds': round(self.performance_metrics['last_operation_time'] or 0, 3),
+            'connection_pool_status': self.test_connection()
+        }
+    
+    def get_data_freshness_status(self) -> Dict[str, Any]:
+        """Get comprehensive data freshness status"""
+        if not self.freshness_tracker:
+            return {'error': 'Freshness tracker not available'}
+        
+        try:
+            return self.freshness_tracker.get_system_health_summary()
+        except Exception as e:
+            logger.error(f"Failed to get freshness status: {e}")
+            return {'error': str(e)}
+    
+    def get_database_health_report(self) -> Dict[str, Any]:
+        """Get comprehensive database health report"""
+        health_report = {
+            'timestamp': datetime.now().isoformat(),
+            'connection_status': 'unknown',
+            'performance_metrics': {},
+            'data_freshness': {},
+            'table_statistics': {},
+            'overall_health': 'unknown'
+        }
+        
+        try:
+            # Test connection
+            health_report['connection_status'] = 'healthy' if self.test_connection() else 'failed'
+            
+            # Get performance metrics
+            health_report['performance_metrics'] = self.get_performance_metrics()
+            
+            # Get data freshness
+            health_report['data_freshness'] = self.get_data_freshness_status()
+            
+            # Get table statistics
+            health_report['table_statistics'] = self.get_database_stats()
+            
+            # Determine overall health
+            connection_ok = health_report['connection_status'] == 'healthy'
+            has_recent_data = bool(health_report['table_statistics'])
+            freshness_ok = not health_report['data_freshness'].get('error')
+            
+            if connection_ok and has_recent_data and freshness_ok:
+                health_report['overall_health'] = 'healthy'
+            elif connection_ok:
+                health_report['overall_health'] = 'degraded'
+            else:
+                health_report['overall_health'] = 'critical'
+            
+            return health_report
+            
+        except Exception as e:
+            logger.error(f"Failed to generate health report: {e}")
+            health_report['overall_health'] = 'critical'
+            health_report['error'] = str(e)
+            return health_report
 
     def close(self):
         """Close all database connections"""

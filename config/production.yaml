@@ -1,0 +1,101 @@
+# MLB Data Service - Production Configuration
+# ==========================================
+
+application:
+  name: "MLB Data Service"
+  version: "1.0.0"
+  environment: "production"
+  debug: false
+  
+database:
+  connection_pool_size: 20
+  max_overflow: 30
+  pool_timeout: 30
+  pool_recycle: 3600
+  echo: false
+  
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  handlers:
+    - type: "file"
+      filename: "/app/logs/mlb_data_service.log"
+      max_bytes: 104857600  # 100MB
+      backup_count: 5
+    - type: "console"
+      
+monitoring:
+  enabled: true
+  metrics_port: 8001
+  health_check_interval: 30
+  
+  # Alert thresholds
+  alerts:
+    response_time_threshold: 2.0  # seconds
+    error_rate_threshold: 0.05   # 5%
+    memory_usage_threshold: 0.85  # 85%
+    cpu_usage_threshold: 0.80     # 80%
+    disk_usage_threshold: 0.90    # 90%
+    database_connection_threshold: 0.80  # 80% of pool
+    
+data_collection:
+  scheduler:
+    enabled: true
+    daily_collection_time: "07:00"
+    retry_attempts: 3
+    retry_delay: 300  # 5 minutes
+    
+  rate_limits:
+    mlb_api_calls_per_minute: 60
+    pybaseball_calls_per_minute: 30
+    fangraphs_calls_per_minute: 20
+    
+  timeouts:
+    api_request_timeout: 30
+    database_query_timeout: 60
+    collection_job_timeout: 1800  # 30 minutes
+    
+security:
+  cors:
+    enabled: true
+    origins: ["*"]  # Restrict in production
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 100
+    burst_size: 200
+    
+performance:
+  cache:
+    enabled: true
+    ttl: 300  # 5 minutes
+    max_size: 1000
+  
+  compression:
+    enabled: true
+    min_size: 1024
+    
+backup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention_days: 30
+  s3_bucket: ""  # Configure for production
+  
+notifications:
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 587
+    smtp_user: ""
+    smtp_password: ""
+    from_address: ""
+    to_addresses: []
+    
+  slack:
+    enabled: false
+    webhook_url: ""
+    channel: "#alerts"
+    
+  webhook:
+    enabled: false
+    url: ""
+    timeout: 10

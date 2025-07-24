@@ -1,0 +1,121 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "MLB Data Service - Overview",
+    "tags": ["mlb", "monitoring", "production"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Service Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=\"mlb-data-service\"}",
+            "legendFormat": "Service Up"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "value": "0",
+                "text": "DOWN"
+              },
+              {
+                "type": "value", 
+                "value": "1",
+                "text": "UP"
+              }
+            ],
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "red",
+                  "value": 0
+                },
+                {
+                  "color": "green",
+                  "value": 1
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "Request Rate (5m)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{job=\"mlb-data-service\"}[5m])",
+            "legendFormat": "Requests/sec"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "Response Time (95th percentile)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=\"mlb-data-service\"}[5m]))",
+            "legendFormat": "95th percentile"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 4,
+        "title": "Error Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{job=\"mlb-data-service\",status=~\"5..\"}[5m])",
+            "legendFormat": "Error Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent"
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 18,
+          "y": 0
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "30s"
+  }
+}

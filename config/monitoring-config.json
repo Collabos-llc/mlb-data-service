@@ -1,0 +1,192 @@
+{
+  "monitoring": {
+    "application_name": "MLB Data Service",
+    "environment": "production",
+    "version": "1.0.0"
+  },
+  "metrics": {
+    "collection_interval": 15,
+    "retention_days": 30,
+    "endpoints": {
+      "health": "/health",
+      "metrics": "/metrics",
+      "status": "/api/v1/status"
+    }
+  },
+  "alerts": {
+    "enabled": true,
+    "evaluation_interval": "30s",
+    "notification_channels": ["email", "slack", "webhook"],
+    "rules": [
+      {
+        "name": "ServiceDown",
+        "condition": "up == 0",
+        "duration": "1m",
+        "severity": "critical",
+        "description": "MLB Data Service is down",
+        "runbook_url": "https://docs.example.com/runbooks/service-down"
+      },
+      {
+        "name": "HighResponseTime",
+        "condition": "http_request_duration_seconds{quantile=\"0.95\"} > 2",
+        "duration": "5m",
+        "severity": "warning",
+        "description": "High response time detected"
+      },
+      {
+        "name": "HighErrorRate",
+        "condition": "rate(http_requests_total{status=~\"5..\"}[5m]) / rate(http_requests_total[5m]) > 0.05",
+        "duration": "3m",
+        "severity": "critical",
+        "description": "High error rate detected"
+      },
+      {
+        "name": "DatabaseConnectionFailure",
+        "condition": "database_connections_failed_total > 0",
+        "duration": "1m",
+        "severity": "critical",
+        "description": "Database connection failures detected"
+      },
+      {
+        "name": "MemoryUsageHigh",
+        "condition": "process_resident_memory_bytes / 1024 / 1024 > 1800",
+        "duration": "10m",
+        "severity": "warning",
+        "description": "Memory usage is high"
+      },
+      {
+        "name": "DiskSpaceHigh",
+        "condition": "node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.1",
+        "duration": "5m",
+        "severity": "warning",
+        "description": "Disk space is running low"
+      },
+      {
+        "name": "DataCollectionFailure",
+        "condition": "data_collection_failed_total > 0",
+        "duration": "1m",
+        "severity": "warning",
+        "description": "Data collection job failed"
+      },
+      {
+        "name": "SchedulerDown",
+        "condition": "scheduler_status != 1",
+        "duration": "2m",
+        "severity": "critical",
+        "description": "Scheduler is not running"
+      }
+    ]
+  },
+  "dashboards": {
+    "refresh_interval": "30s",
+    "auto_reload": true,
+    "panels": [
+      {
+        "name": "Service Health Overview",
+        "type": "stat",
+        "queries": [
+          "up{job=\"mlb-data-service\"}",
+          "rate(http_requests_total[5m])",
+          "http_request_duration_seconds{quantile=\"0.95\"}"
+        ]
+      },
+      {
+        "name": "Request Rate",
+        "type": "graph",
+        "queries": [
+          "rate(http_requests_total[5m])"
+        ]
+      },
+      {
+        "name": "Response Time",
+        "type": "graph",
+        "queries": [
+          "http_request_duration_seconds{quantile=\"0.50\"}",
+          "http_request_duration_seconds{quantile=\"0.95\"}",
+          "http_request_duration_seconds{quantile=\"0.99\"}"
+        ]
+      },
+      {
+        "name": "Error Rate",
+        "type": "graph",
+        "queries": [
+          "rate(http_requests_total{status=~\"4..\"}[5m])",
+          "rate(http_requests_total{status=~\"5..\"}[5m])"
+        ]
+      },
+      {
+        "name": "Database Metrics",
+        "type": "graph",
+        "queries": [
+          "database_connections_active",
+          "database_connections_idle",
+          "database_query_duration_seconds"
+        ]
+      },
+      {
+        "name": "System Resources",
+        "type": "graph",
+        "queries": [
+          "process_resident_memory_bytes",
+          "rate(process_cpu_seconds_total[5m])",
+          "node_filesystem_avail_bytes"
+        ]
+      },
+      {
+        "name": "Data Collection Status",
+        "type": "table",
+        "queries": [
+          "data_collection_last_success_timestamp",
+          "data_collection_records_collected_total",
+          "data_collection_duration_seconds"
+        ]
+      }
+    ]
+  },
+  "logs": {
+    "aggregation": {
+      "enabled": true,
+      "retention_days": 14,
+      "compression": true
+    },
+    "parsing": {
+      "json_logs": true,
+      "timestamp_format": "RFC3339",
+      "level_extraction": true
+    },
+    "filters": [
+      {
+        "name": "error_logs",
+        "pattern": "level=\"error\"",
+        "alert_threshold": 10
+      },
+      {
+        "name": "critical_logs",
+        "pattern": "level=\"critical\"",
+        "alert_threshold": 1
+      },
+      {
+        "name": "database_errors",
+        "pattern": "database.*error",
+        "alert_threshold": 5
+      }
+    ]
+  },
+  "performance": {
+    "profiling": {
+      "enabled": false,
+      "sampling_rate": 0.01
+    },
+    "tracing": {
+      "enabled": false,
+      "sampling_rate": 0.1
+    }
+  },
+  "backup": {
+    "monitoring": {
+      "enabled": true,
+      "success_threshold": "24h",
+      "size_change_threshold": 0.2
+    }
+  }
+}

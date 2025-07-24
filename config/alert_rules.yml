@@ -1,0 +1,120 @@
+# Prometheus Alert Rules for MLB Data Service
+groups:
+  - name: mlb_service_alerts
+    rules:
+      - alert: ServiceDown
+        expr: up{job="mlb-data-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: mlb-data-service
+        annotations:
+          summary: "MLB Data Service is down"
+          description: "MLB Data Service has been down for more than 1 minute"
+          runbook: "https://docs.example.com/runbooks/service-down"
+
+      - alert: HighResponseTime
+        expr: mlb:response_time_95th > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: mlb-data-service
+        annotations:
+          summary: "High response time detected"
+          description: "95th percentile response time is {{ $value }}s for more than 5 minutes"
+
+      - alert: HighErrorRate
+        expr: mlb:error_rate_5m > 0.05
+        for: 3m
+        labels:
+          severity: critical
+          service: mlb-data-service
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} for more than 3 minutes"
+
+      - alert: HighMemoryUsage
+        expr: mlb:memory_usage_percent > 85
+        for: 10m
+        labels:
+          severity: warning
+          service: mlb-data-service
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value }}% for more than 10 minutes"
+
+      - alert: HighCPUUsage
+        expr: mlb:cpu_usage_percent > 80
+        for: 10m
+        labels:
+          severity: warning
+          service: mlb-data-service
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }}% for more than 10 minutes"
+
+  - name: database_alerts
+    rules:
+      - alert: DatabaseDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "PostgreSQL database is down"
+          description: "PostgreSQL database has been down for more than 1 minute"
+
+      - alert: DatabaseConnectionsHigh
+        expr: pg_stat_activity_count > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "High number of database connections"
+          description: "Database has {{ $value }} active connections"
+
+  - name: system_alerts
+    rules:
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Low disk space"
+          description: "Disk space is {{ $value }}% available"
+
+      - alert: MemoryUsageHigh
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High system memory usage"
+          description: "System memory usage is {{ $value }}%"
+
+  - name: data_collection_alerts
+    rules:
+      - alert: DataCollectionFailure
+        expr: increase(data_collection_failed_total[1h]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: data-collection
+        annotations:
+          summary: "Data collection failure"
+          description: "Data collection has failed {{ $value }} times in the last hour"
+
+      - alert: SchedulerDown
+        expr: scheduler_running != 1
+        for: 2m
+        labels:
+          severity: critical
+          service: scheduler
+        annotations:
+          summary: "Scheduler is not running"
+          description: "The data collection scheduler is not running"

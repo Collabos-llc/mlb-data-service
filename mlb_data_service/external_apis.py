@@ -22,6 +22,14 @@ from .enhanced_database import EnhancedDatabaseManager
 
 logger = logging.getLogger(__name__)
 
+# Import monitoring for data quality checks
+try:
+    from .monitoring.data_monitor import DataQualityValidator
+    MONITORING_AVAILABLE = True
+except ImportError:
+    MONITORING_AVAILABLE = False
+    logger.warning("Data monitoring not available")
+
 class ExternalAPIManager:
     """Manages all external API integrations with real-time capabilities"""
     
@@ -50,7 +58,24 @@ class ExternalAPIManager:
         self.last_statcast_update = None
         self.last_games_update = None
         
-        logger.info("Enhanced External API Manager initialized with real-time capabilities")
+        # Initialize data quality validator if available
+        self.quality_validator = None
+        if MONITORING_AVAILABLE:
+            try:
+                self.quality_validator = DataQualityValidator()
+                logger.info("Data quality validator initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize data quality validator: {e}")
+        
+        # Collection failure tracking
+        self.collection_failures = {
+            'fangraphs': 0,
+            'statcast': 0,
+            'games': 0
+        }
+        self.max_consecutive_failures = 3
+        
+        logger.info("Enhanced External API Manager initialized with real-time capabilities and monitoring")
     
     def _rate_limit(self, api_name: str):
         """Enforce rate limiting for API calls"""
@@ -64,6 +89,80 @@ class ExternalAPIManager:
                 time.sleep(sleep_time)
         
         self.last_request_times[api_name] = time.time()
+    
+    def _validate_collected_data(self, data: List[Dict], data_source: str) -> Dict[str, Any]:
+        """Validate collected data for quality issues"""
+        validation_result = {
+            'source': data_source,
+            'total_records': len(data),
+            'validation_passed': True,
+            'issues': [],
+            'quality_score': 1.0
+        }
+        
+        if not data:
+            validation_result['validation_passed'] = False
+            validation_result['issues'].append('No data collected')
+            validation_result['quality_score'] = 0.0
+            return validation_result
+        
+        # Basic data quality checks
+        null_counts = {}
+        invalid_counts = {}
+        
+        for record in data:
+            for key, value in record.items():
+                # Count nulls
+                if value is None or value == '' or (isinstance(value, str) and value.strip() == ''):
+                    null_counts[key] = null_counts.get(key, 0) + 1
+                
+                # Check for invalid numeric values
+                if key in ['batting_avg', 'ops', 'release_speed', 'launch_speed']:
+                    try:
+                        if value is not None:
+                            float_val = float(value)
+                            if float_val < 0 or (key == 'batting_avg' and float_val > 1.0):
+                                invalid_counts[key] = invalid_counts.get(key, 0) + 1
+                    except (ValueError, TypeError):
+                        invalid_counts[key] = invalid_counts.get(key, 0) + 1
+        
+        # Calculate quality issues
+        total_records = len(data)
+        issues = []
+        
+        for field, null_count in null_counts.items():
+            null_percentage = null_count / total_records
+            if null_percentage > 0.1:  # More than 10% nulls
+                issues.append(f"High null percentage in {field}: {null_percentage:.2%}")
+        
+        for field, invalid_count in invalid_counts.items():
+            invalid_percentage = invalid_count / total_records
+            if invalid_percentage > 0.05:  # More than 5% invalid values
+                issues.append(f"High invalid values in {field}: {invalid_percentage:.2%}")
+        
+        # Calculate quality score
+        if issues:
+            validation_result['validation_passed'] = False
+            validation_result['issues'] = issues
+            validation_result['quality_score'] = max(0.0, 1.0 - (len(issues) * 0.2))
+        
+        return validation_result
+    
+    def _handle_collection_failure(self, source: str, error: Exception) -> None:
+        """Handle collection failures with exponential backoff"""
+        self.collection_failures[source] = self.collection_failures.get(source, 0) + 1
+        
+        if self.collection_failures[source] >= self.max_consecutive_failures:
+            logger.error(f"CRITICAL: {source} has failed {self.collection_failures[source]} consecutive times")
+            # Here you could trigger alerts or take corrective action
+        
+        logger.warning(f"Collection failure for {source} (attempt {self.collection_failures[source]}): {error}")
+    
+    def _handle_collection_success(self, source: str) -> None:
+        """Reset failure counter on successful collection"""
+        if self.collection_failures.get(source, 0) > 0:
+            logger.info(f"Collection recovered for {source} after {self.collection_failures[source]} failures")
+            self.collection_failures[source] = 0
     
     def collect_active_players(self, limit: int = 50) -> List[Dict]:
         """Collect active MLB players from PyBaseball/FanGraphs"""
@@ -99,10 +198,18 @@ class ExternalAPIManager:
                         }
                         players.append(player_data)
                     
-                    logger.info(f"Successfully collected {len(players)} active players from FanGraphs")
+                    # Validate collected data
+                    validation_result = self._validate_collected_data(players, 'fangraphs_players')
+                    
+                    if not validation_result['validation_passed']:
+                        logger.warning(f"Data quality issues in player collection: {validation_result['issues']}")
+                    
+                    self._handle_collection_success('fangraphs')
+                    logger.info(f"Successfully collected {len(players)} active players from FanGraphs (quality score: {validation_result['quality_score']:.2f})")
                     return players
                 
             except Exception as fg_error:
+                self._handle_collection_failure('fangraphs', fg_error)
                 logger.warning(f"FanGraphs data unavailable: {fg_error}")
             
             # Fallback to mock data if real API fails
@@ -110,6 +217,7 @@ class ExternalAPIManager:
             return self._get_fallback_players(limit)
             
         except Exception as e:
+            self._handle_collection_failure('fangraphs', e)
             logger.error(f"Player collection failed: {e}")
             return self._get_fallback_players(limit)
     
@@ -145,14 +253,23 @@ class ExternalAPIManager:
                     }
                     games.append(game_data)
                 
-                logger.info(f"Successfully collected {len(games)} games from MLB API")
+                # Validate collected data
+                validation_result = self._validate_collected_data(games, 'mlb_games')
+                
+                if not validation_result['validation_passed']:
+                    logger.warning(f"Data quality issues in games collection: {validation_result['issues']}")
+                
+                self._handle_collection_success('games')
+                logger.info(f"Successfully collected {len(games)} games from MLB API (quality score: {validation_result['quality_score']:.2f})")
                 return games
                 
             except Exception as mlb_error:
+                self._handle_collection_failure('games', mlb_error)
                 logger.warning(f"MLB API unavailable: {mlb_error}")
                 return self._get_fallback_games()
                 
         except Exception as e:
+            self._handle_collection_failure('games', e)
             logger.error(f"Games collection failed: {e}")
             return self._get_fallback_games()
     
@@ -199,16 +316,25 @@ class ExternalAPIManager:
                         }
                         records.append(statcast_record)
                     
-                    logger.info(f"Successfully collected {len(records)} Statcast records")
+                    # Validate collected data
+                    validation_result = self._validate_collected_data(records, 'statcast_data')
+                    
+                    if not validation_result['validation_passed']:
+                        logger.warning(f"Data quality issues in Statcast collection: {validation_result['issues']}")
+                    
+                    self._handle_collection_success('statcast')
+                    logger.info(f"Successfully collected {len(records)} Statcast records (quality score: {validation_result['quality_score']:.2f})")
                     return records
                 
             except Exception as sc_error:
+                self._handle_collection_failure('statcast', sc_error)
                 logger.warning(f"Statcast data unavailable: {sc_error}")
             
             # Fallback data
             return self._get_fallback_statcast(limit)
             
         except Exception as e:
+            self._handle_collection_failure('statcast', e)
             logger.error(f"Statcast collection failed: {e}")
             return self._get_fallback_statcast(limit)
     
@@ -537,6 +663,64 @@ class ExternalAPIManager:
             status['games']['needs_refresh'] = minutes_diff >= 15  # 15-minute refresh
         
         return status
+    
+    def get_comprehensive_monitoring_status(self) -> Dict[str, Any]:
+        """Get comprehensive monitoring status including failures and data quality"""
+        current_time = datetime.now()
+        
+        status = {
+            'timestamp': current_time.isoformat(),
+            'data_freshness': self.get_data_freshness_status(),
+            'collection_failures': self.collection_failures.copy(),
+            'system_health': 'healthy'
+        }
+        
+        # Determine overall system health
+        total_failures = sum(self.collection_failures.values())
+        critical_failures = len([f for f in self.collection_failures.values() if f >= self.max_consecutive_failures])
+        
+        if critical_failures > 0:
+            status['system_health'] = 'critical'
+        elif total_failures > 0:
+            status['system_health'] = 'degraded'
+        
+        # Add quality validation if available
+        if self.quality_validator:
+            try:
+                quality_report = self.quality_validator.get_quality_report()
+                status['data_quality'] = {
+                    'total_issues': quality_report.get('total_issues', 0),
+                    'critical_issues': quality_report.get('critical_issues', 0),
+                    'tables_with_issues': len([
+                        table for table, report in quality_report.get('table_reports', {}).items()
+                        if report.get('total_issues', 0) > 0
+                    ])
+                }
+            except Exception as e:
+                logger.warning(f"Failed to get quality report: {e}")
+                status['data_quality'] = {'error': str(e)}
+        
+        return status
+    
+    def get_performance_metrics(self) -> Dict[str, Any]:
+        """Get performance metrics for data collection operations"""
+        metrics = {
+            'timestamp': datetime.now().isoformat(),
+            'rate_limits': self.rate_limits.copy(),
+            'last_request_times': {
+                k: datetime.fromtimestamp(v).isoformat() if v else None
+                for k, v in self.last_request_times.items()
+            },
+            'connection_pool_status': {
+                'database_connected': self.db_manager.test_connection() if self.db_manager else False
+            },
+            'thread_pool_status': {
+                'active_threads': len(self.executor._threads) if hasattr(self.executor, '_threads') else 0,
+                'max_workers': self.executor._max_workers
+            }
+        }
+        
+        return metrics
     
     def close(self):
         """Clean up resources"""

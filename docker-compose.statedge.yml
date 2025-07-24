@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  statedge-postgres:
+    image: postgres:15-alpine
+    container_name: statedge-postgres
+    environment:
+      POSTGRES_DB: mlb_data
+      POSTGRES_USER: statedge_user
+      POSTGRES_PASSWORD: statedge_secure_2024
+    ports:
+      - "5439:5432"
+    volumes:
+      - statedge_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U statedge_user -d mlb_data"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - statedge-network
+    restart: unless-stopped
+
+  # StatEdge MLB Analytics Platform
+  statedge-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.statedge
+    container_name: statedge-app
+    ports:
+      - "8081:8080"
+    environment:
+      - COMPANY_NAME=StatEdge
+      - SERVICE_NAME=MLB Analytics Platform
+      - DATABASE_URL=postgresql://statedge_user:statedge_secure_2024@statedge-postgres:5432/mlb_data
+      - FLASK_ENV=production
+      - PORT=8080
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      statedge-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - statedge-network
+    restart: unless-stopped
+
+  # Optional: Grafana for advanced monitoring (can be added later)
+  # statedge-grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: statedge-grafana
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=statedge123
+  #   networks:
+  #     - statedge-network
+
+networks:
+  statedge-network:
+    driver: bridge
+
+volumes:
+  statedge_data:
+    driver: local

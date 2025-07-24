@@ -5,44 +5,200 @@ services:
     image: postgres:15-alpine
     container_name: mlb-postgres
     environment:
-      POSTGRES_DB: mlb_data
-      POSTGRES_USER: mlb_user
-      POSTGRES_PASSWORD: mlb_secure_pass_2024
+      POSTGRES_DB: ${POSTGRES_DB:-mlb_data}
+      POSTGRES_USER: ${POSTGRES_USER:-mlb_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlb_secure_pass_2024}
     ports:
-      - "5439:5432"
+      - "${POSTGRES_PORT:-5439}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mlb_user -d mlb_data"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mlb_user} -d ${POSTGRES_DB:-mlb_data}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    restart: unless-stopped
     networks:
       - mlb-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   mlb-data-service:
     build: .
     container_name: mlb-data-service
     ports:
-      - "8101:8001"
+      - "${SERVICE_PORT:-8101}:8001"
     environment:
-      - FLASK_ENV=development
+      - FLASK_ENV=${FLASK_ENV:-production}
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://mlb_user:mlb_secure_pass_2024@postgres:5432/mlb_data
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-mlb_user}:${POSTGRES_PASSWORD:-mlb_secure_pass_2024}@postgres:5432/${POSTGRES_DB:-mlb_data}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MONITORING_ENABLED=${MONITORING_ENABLED:-true}
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
     volumes:
       - ./logs:/app/logs
-      - ./mlb_data_service:/app/mlb_data_service
+      - ./config:/app/config
     depends_on:
       postgres:
         condition: service_healthy
+      prometheus:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
+    networks:
+      - mlb-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Monitoring Stack
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: mlb-prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - mlb-network
+
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: mlb-grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - mlb-network
+
+  alertmanager:
+    image: prom/alertmanager:v0.25.0
+    container_name: mlb-alertmanager
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./config/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - mlb-network
+
+  node-exporter:
+    image: prom/node-exporter:v1.6.0
+    container_name: mlb-node-exporter
+    ports:
+      - "${NODE_EXPORTER_PORT:-9100}:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - mlb-network
+
+  # Log aggregation
+  loki:
+    image: grafana/loki:2.8.0
+    container_name: mlb-loki
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./config/loki.yml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - mlb-network
+
+  promtail:
+    image: grafana/promtail:2.8.0
+    container_name: mlb-promtail
+    volumes:
+      - ./config/promtail.yml:/etc/promtail/config.yml
+      - ./logs:/var/log/mlb-service
+      - /var/log:/var/log:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      loki:
+        condition: service_healthy
+    restart: unless-stopped
     networks:
       - mlb-network
 
@@ -70,4 +226,12 @@ volumes:
   mlb-logs:
     driver: local
   postgres_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  alertmanager_data:
+    driver: local
+  loki_data:
     driver: local

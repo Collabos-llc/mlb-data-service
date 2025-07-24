@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StatEdge - MLB Data Service Monitoring</title>
+    <link rel="stylesheet" href="/static/monitoring/css/dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-content">
+                <h1><i class="fas fa-chart-line"></i> StatEdge MLB Analytics</h1>
+                <div class="header-info">
+                    <span class="timestamp">Last Updated: <span id="last-updated">--</span></span>
+                    <button class="refresh-btn" id="manual-refresh">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- System Health Overview -->
+        <section class="health-overview">
+            <div class="overview-card system-status" id="system-status">
+                <div class="card-header">
+                    <h2><i class="fas fa-heartbeat"></i> System Health</h2>
+                    <div class="status-indicator" id="overall-status">
+                        <span class="status-light unknown"></span>
+                        <span class="status-text">Unknown</span>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <div class="health-metrics">
+                        <div class="metric">
+                            <span class="metric-label">Service Status</span>
+                            <span class="metric-value" id="service-status">--</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Database</span>
+                            <span class="metric-value" id="database-status">--</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Uptime</span>
+                            <span class="metric-value" id="uptime">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Data Source Status Cards -->
+        <section class="data-sources">
+            <h2><i class="fas fa-database"></i> Data Sources</h2>
+            <div class="source-grid">
+                <!-- FanGraphs Batting -->
+                <div class="source-card" id="fangraphs-batting">
+                    <div class="card-header">
+                        <h3>FanGraphs Batting</h3>
+                        <div class="status-indicator">
+                            <span class="status-light unknown"></span>
+                            <span class="status-text">Unknown</span>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div class="source-metrics">
+                            <div class="metric">
+                                <span class="metric-label">Total Records</span>
+                                <span class="metric-value" id="fg-batting-count">--</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Last Collection</span>
+                                <span class="metric-value" id="fg-batting-last">--</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Current Season</span>
+                                <span class="metric-value" id="fg-batting-season">2025</span>
+                            </div>
+                        </div>
+                        <div class="collection-actions">
+                            <button class="collect-btn" onclick="triggerCollection('fangraphs-batting')">
+                                <i class="fas fa-download"></i> Collect Data
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- FanGraphs Pitching -->
+                <div class="source-card" id="fangraphs-pitching">
+                    <div class="card-header">
+                        <h3>FanGraphs Pitching</h3>
+                        <div class="status-indicator">
+                            <span class="status-light unknown"></span>
+                            <span class="status-text">Unknown</span>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div class="source-metrics">
+                            <div class="metric">
+                                <span class="metric-label">Total Records</span>
+                                <span class="metric-value" id="fg-pitching-count">--</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Last Collection</span>
+                                <span class="metric-value" id="fg-pitching-last">--</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Current Season</span>
+                                <span class="metric-value" id="fg-pitching-season">2025</span>
+                            </div>
+                        </div>
+                        <div class="collection-actions">
+                            <button class="collect-btn" onclick="triggerCollection('fangraphs-pitching')">
+                                <i class="fas fa-download"></i> Collect Data
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Statcast -->
+                <div class="source-card" id="statcast">
+                    <div class="card-header">
+                        <h3>Statcast Data</h3>
+                        <div class="status-indicator">
+                            <span class="status-light unknown"></span>
+                            <span class="status-text">Unknown</span>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div class="source-metrics">
+                            <div class="metric">
+                                <span class="metric-label">Total Records</span>
+                                <span class="metric-value" id="statcast-count">--</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Last Collection</span>
+                                <span class="metric-value" id="statcast-last">--</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Date Range</span>
+                                <span class="metric-value" id="statcast-range">--</span>
+                            </div>
+                        </div>
+                        <div class="collection-actions">
+                            <button class="collect-btn" onclick="triggerCollection('statcast')">
+                                <i class="fas fa-download"></i> Collect Data
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API Performance -->
+                <div class="source-card" id="api-performance">
+                    <div class="card-header">
+                        <h3>API Performance</h3>
+                        <div class="status-indicator">
+                            <span class="status-light unknown"></span>
+                            <span class="status-text">Unknown</span>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div class="source-metrics">
+                            <div class="metric">
+                                <span class="metric-label">Response Time</span>
+                                <span class="metric-value" id="api-response-time">--</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Total Endpoints</span>
+                                <span class="metric-value" id="api-endpoints">15</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Success Rate</span>
+                                <span class="metric-value" id="api-success-rate">--</span>
+                            </div>
+                        </div>
+                        <div class="collection-actions">
+                            <button class="collect-btn" onclick="testApiEndpoints()">
+                                <i class="fas fa-bolt"></i> Test APIs
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Alert Center -->
+        <section class="alert-center">
+            <div class="alert-header">
+                <h2><i class="fas fa-exclamation-triangle"></i> Alert Center</h2>
+                <div class="alert-controls">
+                    <button class="clear-alerts-btn" onclick="clearAlerts()">
+                        <i class="fas fa-trash"></i> Clear All
+                    </button>
+                </div>
+            </div>
+            <div class="alert-container" id="alert-container">
+                <div class="no-alerts">
+                    <i class="fas fa-check-circle"></i>
+                    <p>No active alerts</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Performance Metrics -->
+        <section class="performance-metrics">
+            <h2><i class="fas fa-chart-line"></i> Performance Overview</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-header">
+                        <h3>Data Collection Trends</h3>
+                    </div>
+                    <div class="metric-content">
+                        <div class="trend-item">
+                            <span class="trend-label">Daily Collections</span>
+                            <span class="trend-value" id="daily-collections">--</span>
+                        </div>
+                        <div class="trend-item">
+                            <span class="trend-label">Weekly Growth</span>
+                            <span class="trend-value" id="weekly-growth">--</span>
+                        </div>
+                        <div class="trend-item">
+                            <span class="trend-label">Data Freshness</span>
+                            <span class="trend-value" id="data-freshness">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-header">
+                        <h3>System Resources</h3>
+                    </div>
+                    <div class="metric-content">
+                        <div class="resource-item">
+                            <span class="resource-label">Memory Usage</span>
+                            <div class="resource-bar">
+                                <div class="resource-fill" id="memory-usage" style="width: 0%"></div>
+                            </div>
+                            <span class="resource-value" id="memory-percent">0%</span>
+                        </div>
+                        <div class="resource-item">
+                            <span class="resource-label">CPU Usage</span>
+                            <div class="resource-bar">
+                                <div class="resource-fill" id="cpu-usage" style="width: 0%"></div>
+                            </div>
+                            <span class="resource-value" id="cpu-percent">0%</span>
+                        </div>
+                        <div class="resource-item">
+                            <span class="resource-label">Disk Usage</span>
+                            <div class="resource-bar">
+                                <div class="resource-fill" id="disk-usage" style="width: 0%"></div>
+                            </div>
+                            <span class="resource-value" id="disk-percent">0%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Loading overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Loading monitoring data...</p>
+        </div>
+    </div>
+
+    <!-- Collection Modal -->
+    <div class="modal" id="collection-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Data Collection</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body">
+                <p>Collecting data...</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/monitoring/js/dashboard.js"></script>
+</body>
+</html>
