@@ -31,7 +31,6 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/app/logs/mlb_data_service.log'),
         logging.StreamHandler()
     ]
 )

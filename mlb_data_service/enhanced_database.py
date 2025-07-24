@@ -263,9 +263,9 @@ class EnhancedDatabaseManager:
                 # Build insert query - escape quotes properly for special column names
                 column_names = ['"' + col + '"' if ' ' in col or '-' in col or col.startswith(tuple('0123456789')) else col for col in columns]
                 placeholders = ','.join(['%s'] * len(columns))
-                insert_query = """
-                    INSERT INTO statcast ({})
-                    VALUES ({})
+                insert_query = f"""
+                    INSERT INTO statcast ({','.join(column_names)})
+                    VALUES ({placeholders})
                     ON CONFLICT (game_pk, at_bat_number, pitch_number) DO UPDATE SET
                     player_name = EXCLUDED.player_name,
                     events = EXCLUDED.events,
@@ -273,9 +273,10 @@ class EnhancedDatabaseManager:
                     launch_speed = EXCLUDED.launch_speed,
                     launch_angle = EXCLUDED.launch_angle,
                     release_spin_rate = EXCLUDED.release_spin_rate
-                """.format(','.join(column_names), placeholders)
+                """
                 
-                execute_values(cursor, insert_query, values, page_size=1000)
+                # Use executemany for more reliable insertion
+                cursor.executemany(insert_query, values)
                 
                 conn.commit()
                 cursor.close()
