@@ -13,28 +13,44 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import time
+import asyncio
+import aiohttp
+from concurrent.futures import ThreadPoolExecutor
+from .enhanced_database import EnhancedDatabaseManager
 
 logger = logging.getLogger(__name__)
 
 class ExternalAPIManager:
-    """Manages all external API integrations"""
+    """Manages all external API integrations with real-time capabilities"""
     
-    def __init__(self):
+    def __init__(self, database_manager: EnhancedDatabaseManager = None):
         """Initialize API manager with configuration"""
         self.cache = {}
         self.last_request_times = {}
         self.rate_limits = {
             'pybaseball': 1.0,  # 1 second between requests
             'mlb_api': 0.5,     # 0.5 seconds between requests
-            'weather': 2.0      # 2 seconds between requests
+            'weather': 2.0,     # 2 seconds between requests
+            'fangraphs': 2.0    # 2 seconds between FanGraphs requests
         }
+        
+        # Initialize database manager
+        self.db_manager = database_manager or EnhancedDatabaseManager()
+        
+        # Thread pool for concurrent operations
+        self.executor = ThreadPoolExecutor(max_workers=4)
         
         # Disable PyBaseball cache for fresh data
         pyb.cache.disable()
         
-        logger.info("External API Manager initialized")
+        # Data freshness tracking
+        self.last_fangraphs_update = None
+        self.last_statcast_update = None
+        self.last_games_update = None
+        
+        logger.info("Enhanced External API Manager initialized with real-time capabilities")
     
     def _rate_limit(self, api_name: str):
         """Enforce rate limiting for API calls"""
@@ -279,3 +295,263 @@ class ExternalAPIManager:
             }
         ]
         return fallback_records[:limit]
+    
+    def collect_live_fangraphs_data(self, force_refresh: bool = False) -> Dict[str, Any]:
+        """Collect live FanGraphs data with intelligent caching"""
+        try:
+            current_time = datetime.now()
+            
+            # Check if we need to refresh (daily refresh or forced)
+            if not force_refresh and self.last_fangraphs_update:
+                time_since_update = current_time - self.last_fangraphs_update
+                if time_since_update.total_seconds() < 3600:  # Less than 1 hour
+                    logger.info("FanGraphs data is fresh, skipping collection")
+                    return {'status': 'skipped', 'reason': 'data_fresh'}
+            
+            logger.info("Collecting live FanGraphs batting and pitching data...")
+            self._rate_limit('fangraphs')
+            
+            current_year = current_time.year
+            results = {
+                'started_at': current_time.isoformat(),
+                'batting_records': 0,
+                'pitching_records': 0,
+                'errors': []
+            }
+            
+            # Collect batting data
+            try:
+                batting_count = self.db_manager.collect_and_store_fangraphs_batting(
+                    season=current_year, min_pa=10
+                )
+                results['batting_records'] = batting_count
+                logger.info(f"✅ Collected {batting_count} FanGraphs batting records")
+            except Exception as e:
+                error_msg = f"FanGraphs batting collection failed: {e}"
+                results['errors'].append(error_msg)
+                logger.error(error_msg)
+            
+            # Collect pitching data
+            try:
+                pitching_count = self.db_manager.collect_and_store_fangraphs_pitching(
+                    season=current_year, min_ip=5
+                )
+                results['pitching_records'] = pitching_count
+                logger.info(f"✅ Collected {pitching_count} FanGraphs pitching records")
+            except Exception as e:
+                error_msg = f"FanGraphs pitching collection failed: {e}"
+                results['errors'].append(error_msg)
+                logger.error(error_msg)
+            
+            # Update last refresh time
+            self.last_fangraphs_update = current_time
+            results['completed_at'] = datetime.now().isoformat()
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Live FanGraphs collection failed: {e}")
+            return {'status': 'error', 'error': str(e)}
+    
+    def collect_live_statcast_data(self, hours_back: int = 6) -> Dict[str, Any]:
+        """Collect live Statcast data with hourly refresh"""
+        try:
+            current_time = datetime.now()
+            
+            # Check if we need to refresh (hourly refresh)
+            if self.last_statcast_update:
+                time_since_update = current_time - self.last_statcast_update
+                if time_since_update.total_seconds() < 3600:  # Less than 1 hour
+                    logger.info("Statcast data is fresh, skipping collection")
+                    return {'status': 'skipped', 'reason': 'data_fresh'}
+            
+            logger.info(f"Collecting live Statcast data from last {hours_back} hours...")
+            self._rate_limit('pybaseball')
+            
+            # Calculate date range
+            end_time = current_time
+            start_time = end_time - timedelta(hours=hours_back)
+            
+            start_date = start_time.strftime('%Y-%m-%d')
+            end_date = end_time.strftime('%Y-%m-%d')
+            
+            results = {
+                'started_at': current_time.isoformat(),
+                'start_date': start_date,
+                'end_date': end_date,
+                'records_collected': 0,
+                'errors': []
+            }
+            
+            try:
+                # Collect and store Statcast data
+                records_count = self.db_manager.collect_and_store_statcast(
+                    start_date=start_date, end_date=end_date
+                )
+                results['records_collected'] = records_count
+                logger.info(f"✅ Collected {records_count} Statcast records")
+                
+                # Update last refresh time
+                self.last_statcast_update = current_time
+                
+            except Exception as e:
+                error_msg = f"Statcast collection failed: {e}"
+                results['errors'].append(error_msg)
+                logger.error(error_msg)
+            
+            results['completed_at'] = datetime.now().isoformat()
+            return results
+            
+        except Exception as e:
+            logger.error(f"Live Statcast collection failed: {e}")
+            return {'status': 'error', 'error': str(e)}
+    
+    def collect_live_games_data(self, days_ahead: int = 3) -> Dict[str, Any]:
+        """Collect live MLB games data with real-time updates"""
+        try:
+            current_time = datetime.now()
+            
+            # Check if we need to refresh (every 15 minutes for live games)
+            if self.last_games_update:
+                time_since_update = current_time - self.last_games_update
+                if time_since_update.total_seconds() < 900:  # Less than 15 minutes
+                    logger.info("Games data is fresh, skipping collection")
+                    return {'status': 'skipped', 'reason': 'data_fresh'}
+            
+            logger.info(f"Collecting live MLB games data for next {days_ahead} days...")
+            self._rate_limit('mlb_api')
+            
+            results = {
+                'started_at': current_time.isoformat(),
+                'games_collected': 0,
+                'date_range': [],
+                'errors': []
+            }
+            
+            # Collect games for multiple days
+            for day_offset in range(days_ahead + 1):  # Include today
+                target_date = current_time + timedelta(days=day_offset)
+                date_str = target_date.strftime('%Y-%m-%d')
+                results['date_range'].append(date_str)
+                
+                try:
+                    # Get schedule from MLB API
+                    schedule = statsapi.schedule(start_date=date_str, end_date=date_str)
+                    
+                    for game in schedule:
+                        # Store game data (you could extend this to store in database)
+                        logger.debug(f"Found game: {game.get('away_name', '')} @ {game.get('home_name', '')}")
+                    
+                    results['games_collected'] += len(schedule)
+                    logger.info(f"✅ Collected {len(schedule)} games for {date_str}")
+                    
+                except Exception as e:
+                    error_msg = f"Games collection failed for {date_str}: {e}"
+                    results['errors'].append(error_msg)
+                    logger.error(error_msg)
+            
+            # Update last refresh time
+            self.last_games_update = current_time
+            results['completed_at'] = datetime.now().isoformat()
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Live games collection failed: {e}")
+            return {'status': 'error', 'error': str(e)}
+    
+    async def collect_all_live_data(self) -> Dict[str, Any]:
+        """Collect all live data sources concurrently"""
+        logger.info("Starting concurrent collection of all live data sources...")
+        
+        start_time = datetime.now()
+        
+        # Run collections concurrently
+        loop = asyncio.get_event_loop()
+        
+        fangraphs_future = loop.run_in_executor(
+            self.executor, self.collect_live_fangraphs_data
+        )
+        statcast_future = loop.run_in_executor(
+            self.executor, self.collect_live_statcast_data
+        )
+        games_future = loop.run_in_executor(
+            self.executor, self.collect_live_games_data
+        )
+        
+        # Wait for all to complete
+        fangraphs_result, statcast_result, games_result = await asyncio.gather(
+            fangraphs_future, statcast_future, games_future, return_exceptions=True
+        )
+        
+        # Compile results
+        results = {
+            'started_at': start_time.isoformat(),
+            'completed_at': datetime.now().isoformat(),
+            'fangraphs': fangraphs_result if not isinstance(fangraphs_result, Exception) else {'error': str(fangraphs_result)},
+            'statcast': statcast_result if not isinstance(statcast_result, Exception) else {'error': str(statcast_result)},
+            'games': games_result if not isinstance(games_result, Exception) else {'error': str(games_result)},
+            'total_duration_seconds': (datetime.now() - start_time).total_seconds()
+        }
+        
+        logger.info(f"Concurrent data collection completed in {results['total_duration_seconds']:.2f} seconds")
+        return results
+    
+    def get_data_freshness_status(self) -> Dict[str, Any]:
+        """Get status of data freshness across all sources"""
+        current_time = datetime.now()
+        
+        status = {
+            'current_time': current_time.isoformat(),
+            'fangraphs': {
+                'last_update': self.last_fangraphs_update.isoformat() if self.last_fangraphs_update else None,
+                'hours_since_update': None,
+                'needs_refresh': True
+            },
+            'statcast': {
+                'last_update': self.last_statcast_update.isoformat() if self.last_statcast_update else None,
+                'hours_since_update': None,
+                'needs_refresh': True
+            },
+            'games': {
+                'last_update': self.last_games_update.isoformat() if self.last_games_update else None,
+                'minutes_since_update': None,
+                'needs_refresh': True
+            }
+        }
+        
+        # Calculate time differences and refresh needs
+        if self.last_fangraphs_update:
+            hours_diff = (current_time - self.last_fangraphs_update).total_seconds() / 3600
+            status['fangraphs']['hours_since_update'] = round(hours_diff, 2)
+            status['fangraphs']['needs_refresh'] = hours_diff >= 24  # Daily refresh
+        
+        if self.last_statcast_update:
+            hours_diff = (current_time - self.last_statcast_update).total_seconds() / 3600
+            status['statcast']['hours_since_update'] = round(hours_diff, 2)
+            status['statcast']['needs_refresh'] = hours_diff >= 1  # Hourly refresh
+        
+        if self.last_games_update:
+            minutes_diff = (current_time - self.last_games_update).total_seconds() / 60
+            status['games']['minutes_since_update'] = round(minutes_diff, 2)
+            status['games']['needs_refresh'] = minutes_diff >= 15  # 15-minute refresh
+        
+        return status
+    
+    def close(self):
+        """Clean up resources"""
+        self.executor.shutdown(wait=True)
+        if self.db_manager:
+            self.db_manager.close()
+        logger.info("External API Manager closed")
+
+
+# Global instances
+_api_manager_instance = None
+
+def get_api_manager() -> ExternalAPIManager:
+    """Get or create API manager instance"""
+    global _api_manager_instance
+    if _api_manager_instance is None:
+        _api_manager_instance = ExternalAPIManager()
+    return _api_manager_instance

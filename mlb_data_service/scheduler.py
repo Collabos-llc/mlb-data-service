@@ -11,32 +11,61 @@ import os
 from datetime import datetime, time
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 import requests
 import json
+import asyncio
+from .external_apis import get_api_manager
+from .enhanced_database import EnhancedDatabaseManager
 
 logger = logging.getLogger(__name__)
 
 class MLBDataScheduler:
-    """Manages automated daily data collection"""
+    """Manages automated real-time data collection with multiple refresh intervals"""
     
     def __init__(self, service_url: str = "http://localhost:8001"):
         self.service_url = service_url
         self.scheduler = BackgroundScheduler()
         self.scheduler.add_listener(self._job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+        
+        # Initialize API manager and database
+        self.api_manager = get_api_manager()
+        self.db_manager = EnhancedDatabaseManager()
+        
         self._setup_jobs()
         
     def _setup_jobs(self):
-        """Setup scheduled jobs for daily data collection"""
+        """Setup scheduled jobs for real-time data collection with multiple refresh intervals"""
         
-        # Daily data collection at 7:00 AM
+        # FanGraphs data collection - Daily at 7:00 AM
         self.scheduler.add_job(
-            func=self._daily_collection_job,
+            func=self._fangraphs_collection_job,
             trigger=CronTrigger(hour=7, minute=0),  # 7:00 AM every day
-            id='daily_mlb_collection',
-            name='Daily MLB Data Collection',
+            id='daily_fangraphs_collection',
+            name='Daily FanGraphs Data Collection',
             replace_existing=True,
             misfire_grace_time=300  # Allow 5 minutes grace period
+        )
+        
+        # Statcast data collection - Every hour during baseball season
+        self.scheduler.add_job(
+            func=self._statcast_collection_job,
+            trigger=IntervalTrigger(hours=1),  # Every hour
+            id='hourly_statcast_collection',
+            name='Hourly Statcast Data Collection',
+            replace_existing=True,
+            misfire_grace_time=300
+        )
+        
+        # MLB games data collection - Every 15 minutes during game days
+        self.scheduler.add_job(
+            func=self._games_collection_job,
+            trigger=IntervalTrigger(minutes=15),  # Every 15 minutes
+            id='live_games_collection',
+            name='Live MLB Games Collection',
+            replace_existing=True,
+            misfire_grace_time=120
         )
         
         # Health check job every hour
@@ -45,6 +74,15 @@ class MLBDataScheduler:
             trigger=CronTrigger(minute=0),  # Every hour at minute 0
             id='hourly_health_check',
             name='Hourly Health Check',
+            replace_existing=True
+        )
+        
+        # Data freshness check every 30 minutes
+        self.scheduler.add_job(
+            func=self._data_freshness_check_job,
+            trigger=IntervalTrigger(minutes=30),  # Every 30 minutes
+            id='data_freshness_check',
+            name='Data Freshness Check',
             replace_existing=True
         )
         
@@ -57,9 +95,12 @@ class MLBDataScheduler:
             replace_existing=True
         )
         
-        logger.info("Scheduled jobs configured:")
-        logger.info("  - Daily collection: 7:00 AM")
+        logger.info("Real-time scheduled jobs configured:")
+        logger.info("  - FanGraphs collection: Daily at 7:00 AM")
+        logger.info("  - Statcast collection: Every hour")
+        logger.info("  - Games collection: Every 15 minutes")
         logger.info("  - Health checks: Every hour")
+        logger.info("  - Data freshness checks: Every 30 minutes")
         logger.info("  - Weekly cleanup: Sunday 2:00 AM")
     
     def _daily_collection_job(self):
@@ -151,6 +192,105 @@ class MLBDataScheduler:
         
         return collection_results
     
+    def _fangraphs_collection_job(self):
+        """Execute FanGraphs data collection job"""
+        logger.info("Starting automated FanGraphs data collection...")
+        
+        try:
+            result = self.api_manager.collect_live_fangraphs_data(force_refresh=True)
+            
+            if result.get('status') == 'error':
+                logger.error(f"FanGraphs collection failed: {result.get('error')}")
+                return result
+            
+            batting_records = result.get('batting_records', 0)
+            pitching_records = result.get('pitching_records', 0)
+            total_records = batting_records + pitching_records
+            
+            logger.info(f"✅ FanGraphs collection completed: {total_records} records")
+            logger.info(f"   - Batting: {batting_records} records")
+            logger.info(f"   - Pitching: {pitching_records} records")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"FanGraphs collection job failed: {e}")
+            return {'status': 'error', 'error': str(e)}
+    
+    def _statcast_collection_job(self):
+        """Execute Statcast data collection job"""
+        logger.info("Starting automated Statcast data collection...")
+        
+        try:
+            result = self.api_manager.collect_live_statcast_data(hours_back=6)
+            
+            if result.get('status') == 'error':
+                logger.error(f"Statcast collection failed: {result.get('error')}")
+                return result
+            
+            if result.get('status') == 'skipped':
+                logger.info("Statcast collection skipped - data is fresh")
+                return result
+            
+            records_collected = result.get('records_collected', 0)
+            logger.info(f"✅ Statcast collection completed: {records_collected} records")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Statcast collection job failed: {e}")
+            return {'status': 'error', 'error': str(e)}
+    
+    def _games_collection_job(self):
+        """Execute MLB games data collection job"""
+        logger.info("Starting automated MLB games data collection...")
+        
+        try:
+            result = self.api_manager.collect_live_games_data(days_ahead=3)
+            
+            if result.get('status') == 'error':
+                logger.error(f"Games collection failed: {result.get('error')}")
+                return result
+            
+            if result.get('status') == 'skipped':
+                logger.debug("Games collection skipped - data is fresh")
+                return result
+            
+            games_collected = result.get('games_collected', 0)
+            logger.info(f"✅ Games collection completed: {games_collected} games")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Games collection job failed: {e}")
+            return {'status': 'error', 'error': str(e)}
+    
+    def _data_freshness_check_job(self):
+        """Check data freshness across all sources"""
+        logger.debug("Checking data freshness...")
+        
+        try:
+            status = self.api_manager.get_data_freshness_status()
+            
+            # Log any stale data warnings
+            for source, info in status.items():
+                if source == 'current_time':
+                    continue
+                    
+                if isinstance(info, dict) and info.get('needs_refresh'):
+                    if source == 'fangraphs' and info.get('hours_since_update', 0) > 48:
+                        logger.warning(f"⚠️ FanGraphs data is stale: {info.get('hours_since_update')} hours old")
+                    elif source == 'statcast' and info.get('hours_since_update', 0) > 6:
+                        logger.warning(f"⚠️ Statcast data is stale: {info.get('hours_since_update')} hours old")
+                    elif source == 'games' and info.get('minutes_since_update', 0) > 60:
+                        logger.warning(f"⚠️ Games data is stale: {info.get('minutes_since_update')} minutes old")
+            
+            return status
+            
+        except Exception as e:
+            logger.error(f"Data freshness check failed: {e}")
+            return {'status': 'error', 'error': str(e)}
+    
     def _health_check_job(self):
         """Perform hourly health check"""
         try:
@@ -205,6 +345,43 @@ class MLBDataScheduler:
         logger.info("Manually triggering daily collection...")
         return self._daily_collection_job()
     
+    def trigger_live_collection(self):
+        """Manually trigger all live data collection"""
+        logger.info("Manually triggering all live data collection...")
+        
+        results = {
+            'started_at': datetime.now().isoformat(),
+            'fangraphs': None,
+            'statcast': None,
+            'games': None
+        }
+        
+        # Execute all collection jobs
+        try:
+            results['fangraphs'] = self._fangraphs_collection_job()
+        except Exception as e:
+            results['fangraphs'] = {'status': 'error', 'error': str(e)}
+        
+        try:
+            results['statcast'] = self._statcast_collection_job()
+        except Exception as e:
+            results['statcast'] = {'status': 'error', 'error': str(e)}
+        
+        try:
+            results['games'] = self._games_collection_job()
+        except Exception as e:
+            results['games'] = {'status': 'error', 'error': str(e)}
+        
+        results['completed_at'] = datetime.now().isoformat()
+        
+        # Log summary
+        successful_jobs = sum(1 for job_result in [results['fangraphs'], results['statcast'], results['games']] 
+                             if job_result and job_result.get('status') != 'error')
+        
+        logger.info(f"Live data collection completed: {successful_jobs}/3 jobs successful")
+        
+        return results
+    
     def get_job_status(self):
         """Get status of scheduled jobs"""
         if not self.scheduler.running:
@@ -227,7 +404,8 @@ class MLBDataScheduler:
             'scheduler_info': {
                 'timezone': str(self.scheduler.timezone),
                 'state': 'running' if self.scheduler.running else 'stopped'
-            }
+            },
+            'data_freshness': self.api_manager.get_data_freshness_status() if hasattr(self, 'api_manager') else {}
         }
 
 # Global scheduler instance
