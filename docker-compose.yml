@@ -1,17 +1,41 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: mlb-postgres
+    environment:
+      POSTGRES_DB: mlb_data
+      POSTGRES_USER: mlb_user
+      POSTGRES_PASSWORD: mlb_secure_pass_2024
+    ports:
+      - "5439:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlb_user -d mlb_data"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mlb-network
+
   mlb-data-service:
     build: .
     container_name: mlb-data-service
     ports:
-      - "8001:8001"
+      - "8101:8001"
     environment:
       - FLASK_ENV=development
       - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://mlb_user:mlb_secure_pass_2024@postgres:5432/mlb_data
     volumes:
       - ./logs:/app/logs
       - ./mlb_data_service:/app/mlb_data_service
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
@@ -44,4 +68,6 @@ networks:
 
 volumes:
   mlb-logs:
+    driver: local
+  postgres_data:
     driver: local

@@ -3,6 +3,7 @@
 
 # Database connectivity
 psycopg2-binary>=2.9.0
+sqlalchemy>=2.0.0
 
 # Data analysis and machine learning
 numpy>=1.24.0
@@ -38,12 +39,15 @@ toml>=0.10.0
 
 # Baseball-specific packages
 pybaseball>=2.2.0
-statsapi>=1.6.0
+MLB-StatsAPI>=1.6.0
 
 # Flask for microservices
 flask>=2.3.0
 flask-cors>=4.0.0
 gunicorn>=21.0.0
+
+# Scheduling
+apscheduler>=3.10.0
 
 # Email functionality (for monitoring alerts)
 secure-smtplib>=0.1.1

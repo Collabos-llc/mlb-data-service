@@ -1,113 +1,182 @@
-# MLB Data Service
+# MLB Data Service - Enhanced Analytics Platform
 
-A containerized microservice for collecting and serving MLB data via REST API endpoints. Built with Flask and Docker, integrating with PyBaseball and MLB Stats API.
+A comprehensive, production-ready MLB analytics platform with advanced sabermetrics, Statcast data, and unified player lookup capabilities. Built with Flask, PostgreSQL, and Docker.
 
-## Features
+## 🚀 Features
 
-- **8 REST API endpoints** for data collection and retrieval
-- **External API integration** with PyBaseball, FanGraphs, and MLB Stats API  
-- **Docker containerization** with health checks and monitoring
-- **Rate limiting** and fallback strategies for API reliability
-- **Production-ready** logging and error handling
+- **🗄️ Comprehensive Database**: 472K+ Statcast records, 1.3K+ FanGraphs batting/pitching stats
+- **🔑 Unified Player Lookup**: 25,815 players with cross-system ID mappings
+- **📊 Advanced Analytics**: 320+ FanGraphs batting fields, 393+ pitching fields, 118+ Statcast fields
+- **🌐 REST API**: 11+ endpoints for data collection, retrieval, and player lookup
+- **🐳 Production Docker**: Containerized with health checks and monitoring
+- **⚡ High Performance**: Optimized queries with database indexing
 
-## Quick Start
+## 🚀 Quick Start
 
 ```bash
-# Clone and start the service
+# Start the enhanced service
 git clone <repo-url>
 cd mlb-data-service
 docker-compose up --build -d
 
 # Verify service health
-curl http://localhost:8001/health
+curl http://localhost:8101/health
 
-# Collect player data
-curl -X POST http://localhost:8001/api/v1/collect/players \
-  -H 'Content-Type: application/json' \
-  -d '{"limit": 10}'
+# Search for a player
+curl "http://localhost:8101/api/v1/player/search?q=Aaron%20Judge"
 
-# Retrieve collected data
-curl http://localhost:8001/api/v1/players
+# Get unified player profile
+curl "http://localhost:8101/api/v1/player/profile?name=Shohei%20Ohtani"
+
+# Get FanGraphs batting data  
+curl "http://localhost:8101/api/v1/fangraphs/batting?season=2025&limit=5"
+
+# Get Statcast data
+curl "http://localhost:8101/api/v1/statcast?limit=5"
 ```
 
-## API Endpoints
+## 📡 API Endpoints
 
+### Core Service
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check for container orchestration |
-| GET | `/api/v1/status` | Service status and collection statistics |
-| GET | `/api/v1/players` | Retrieve collected player data |
-| GET | `/api/v1/games/today` | Retrieve today's MLB games |
-| GET | `/api/v1/statcast` | Retrieve Statcast data |
-| POST | `/api/v1/collect/players` | Trigger player data collection |
-| POST | `/api/v1/collect/games` | Trigger games data collection |
-| POST | `/api/v1/collect/statcast` | Trigger Statcast data collection |
+| GET | `/api/v1/status` | Service status and comprehensive database statistics |
 
-## Architecture
+### Player Lookup & Profiles
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/player/search` | Search players across all systems |
+| GET | `/api/v1/player/profile` | Unified player profile (FanGraphs + Statcast) |
+| GET | `/api/v1/player/ids` | Player ID mappings across all systems |
+
+### Advanced Analytics Data
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/fangraphs/batting` | FanGraphs batting statistics (320+ fields) |
+| GET | `/api/v1/statcast` | Statcast pitch-level data (118+ fields) |
+| GET | `/api/v1/analytics/summary` | Comprehensive analytics overview |
+
+### Data Collection
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/collect/fangraphs/batting` | Collect FanGraphs batting data |
+| POST | `/api/v1/collect/fangraphs/pitching` | Collect FanGraphs pitching data |
+| POST | `/api/v1/collect/statcast` | Collect Statcast data |
+
+## 🏗️ Architecture
 
 ```
 mlb-data-service/
 ├── mlb_data_service/
-│   ├── app.py              # Main Flask application
-│   └── external_apis.py    # External API integration
-├── logs/                   # Application logs
-├── Dockerfile             # Container configuration
-├── docker-compose.yml     # Service orchestration
-├── requirements.txt       # Python dependencies
-├── test_mlb_service.py    # End-to-end test suite
-├── validate_service.py    # Service validation
-└── demo_complete_system.py # Complete demo
+│   ├── enhanced_app.py           # Enhanced Flask application
+│   ├── enhanced_database.py     # Advanced database manager
+│   ├── app.py                   # Legacy Flask application
+│   └── external_apis.py         # External API integration
+├── sql/                         # Database schema and migrations
+├── logs/                        # Application logs
+├── docker-compose.yml           # Service orchestration with PostgreSQL
+├── Dockerfile                   # Container configuration
+├── requirements.txt             # Python dependencies
+├── player_lookup_analysis.py    # Player ID mapping analysis
+├── PLAYER_LOOKUP_INTEGRATION.md # Comprehensive integration guide
+└── migration scripts/           # Database migration utilities
 ```
 
-## External APIs
+## 🗄️ Database Schema
 
-- **PyBaseball**: FanGraphs batting/pitching statistics and Statcast data
-- **MLB Stats API**: Games, schedules, scores, and team information
-- **Rate limiting**: Intelligent throttling to prevent API abuse
-- **Fallback data**: Offline development support
+### Core Tables
+- **`player_lookup`** (25,815 records): Master player registry with cross-system IDs
+- **`fangraphs_batting`** (1,323 records): 320+ advanced batting metrics
+- **`fangraphs_pitching`** (765 records): 393+ advanced pitching metrics  
+- **`fangraphs_fielding`** (1,976 records): 63+ defensive statistics
+- **`statcast`** (472,395 records): 118+ pitch-level analytics
 
-## Development
+### Key Relationships
+- `player_lookup.key_fangraphs` → `fangraphs_batting."IDfg"`
+- `player_lookup.key_mlbam` → `statcast.batter/pitcher`
+- Optimized indexes for cross-system queries
+
+## 🔗 Data Sources
+
+- **FanGraphs**: Advanced sabermetrics (wOBA, wRC+, WAR, FIP, xFIP)
+- **Statcast**: Pitch tracking (exit velocity, launch angle, spin rate)
+- **MLB Advanced Media**: Player identification and game context
+- **Baseball Reference**: Historical player data and career spans
+
+## 💻 Development
 
 ```bash
 # Install dependencies
 pip install -r requirements.txt
 
-# Run validation
-python validate_service.py
+# Run player lookup analysis
+python3 player_lookup_analysis.py
 
-# Run tests (requires service running)
-python test_mlb_service.py
+# Run migration validation
+python3 statcast_migration_report.py
 
-# View demo
-python demo_complete_system.py
+# Database direct access
+PGPASSWORD=mlb_secure_pass_2024 psql -h localhost -p 5439 -U mlb_user -d mlb_data
 ```
 
-## Production Deployment
+## 🚀 Production Deployment
 
 The service is production-ready with:
-- Health check endpoint for Kubernetes/Docker Swarm
-- Structured logging for monitoring
-- CORS configuration for cross-origin requests
-- Error handling and graceful failures
-- Environment-based configuration
+- **Health check endpoint** for Kubernetes/Docker Swarm
+- **Comprehensive logging** for monitoring and debugging
+- **Optimized database** with indexes and connection pooling
+- **CORS configuration** for cross-origin requests
+- **Error handling** and graceful failure recovery
+- **Environment-based configuration** for different deployment stages
 
-## Integration
+## 📊 Analytics Capabilities
 
-This microservice is designed to integrate with:
-- **Prediction Engine** (Port 8002) - Consumes MLB data
-- **Content Creation Service** (Port 8003) - Uses predictions
-- **Social Media Service** (Port 8004) - Publishes content
+### Advanced Metrics Available
+- **Batting**: wOBA, wRC+, WAR, Barrel%, xwOBA, Exit Velocity (320+ fields)
+- **Pitching**: FIP, xFIP, SIERA, K%, BB%, WHIP (393+ fields)
+- **Statcast**: Spin rate, launch angle, expected outcomes, movement data (118+ fields)
 
-## Monitoring
+### Cross-System Analysis
+```bash
+# Find top performers with both FanGraphs and Statcast data
+curl "http://localhost:8101/api/v1/player/profile?name=Aaron%20Judge"
+
+# Search players across all systems
+curl "http://localhost:8101/api/v1/player/search?q=Ohtani"
+
+# Get comprehensive analytics overview
+curl "http://localhost:8101/api/v1/analytics/summary"
+```
+
+## 🔍 Documentation
+
+- **[PLAYER_LOOKUP_INTEGRATION.md](PLAYER_LOOKUP_INTEGRATION.md)**: Complete player ID mapping guide
+- **player_lookup_analysis.py**: Automated analysis and validation scripts
+- **API Documentation**: All endpoints documented with examples above
+
+## 📈 Monitoring
 
 Monitor service health and performance:
 ```bash
-# Check logs
-docker-compose logs -f mlb-data-service
+# Check enhanced service logs
+docker logs enhanced-mlb-test -f
 
-# Service statistics
-curl http://localhost:8001/api/v1/status
+# Service statistics with database metrics
+curl http://localhost:8101/api/v1/status
 
 # Health monitoring
-curl http://localhost:8001/health
+curl http://localhost:8101/health
+
+# Database connection test
+curl "http://localhost:8101/api/v1/analytics/summary"
 ```
+
+## 🎯 Use Cases
+
+- **Sabermetric Analysis**: Combine traditional and advanced metrics
+- **Player Evaluation**: Unified profiles across all data sources
+- **Pitch Analysis**: Detailed Statcast data with player context
+- **Historical Research**: Cross-reference players across systems
+- **Fantasy Baseball**: Advanced metrics for player evaluation
+- **Broadcasting/Media**: Rich player data for content creation
